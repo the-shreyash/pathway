@@ -512,6 +512,7 @@ class BaseRAGQuestionAnswerer(SummaryQuestionAnswerer):
         context_processor: (
             BaseContextProcessor | Callable[[list[dict] | list[Doc]], str] | pw.UDF
         ) = SimpleContextProcessor(),
+        query_transform: Callable[[str], str] | pw.UDF | None = None,
         summarize_template: pw.UDF = prompts.prompt_summarize,
         search_topk: int = 6,
     ) -> None:
@@ -536,6 +537,20 @@ class BaseRAGQuestionAnswerer(SummaryQuestionAnswerer):
             raise ValueError(
                 "Context processor must be type of one of the following: \
                              ~BaseContextProcessor | Callable[[list[dict] | list[Doc]], str] | ~pw.UDF"
+            )
+
+        # Optional query transformation (e.g. query rewriting / HyDE). If provided, it
+        # should be either a pw.UDF or a callable that accepts a query string and
+        # returns a transformed query string. If None, original query will be used.
+        if query_transform is None:
+            self.query_transform = None
+        elif isinstance(query_transform, pw.UDF):
+            self.query_transform = query_transform
+        elif callable(query_transform):
+            self.query_transform = pw.udf(query_transform)
+        else:
+            raise ValueError(
+                "query_transform must be either a pw.UDF, a callable, or None"
             )
 
         self._pending_endpoints: list[tuple] = []
@@ -567,11 +582,17 @@ class BaseRAGQuestionAnswerer(SummaryQuestionAnswerer):
     def answer_query(self, pw_ai_queries: pw.Table) -> pw.Table:
         """Answer a question based on the available information."""
 
+        # Prepare query for retrieval — optionally rewrite the incoming query
+        if self.query_transform is None:
+            query_for_index = pw.this.prompt
+        else:
+            query_for_index = self.query_transform(pw.this.prompt)
+
         pw_ai_results = pw_ai_queries + self.indexer.retrieve_query(
             pw_ai_queries.select(
                 metadata_filter=pw.this.filters,
                 filepath_globpattern=pw.cast(str | None, None),
-                query=pw.this.prompt,
+                query=query_for_index,
                 k=self.search_topk,
             )
         ).select(
@@ -826,6 +847,7 @@ class AdaptiveRAGQuestionAnswerer(BaseRAGQuestionAnswerer):
         context_processor: (
             BaseContextProcessor | Callable[[list[dict] | list[Doc]], str] | pw.UDF
         ) = SimpleContextProcessor(),
+        query_transform: Callable[[str], str] | pw.UDF | None = None,
         summarize_template: pw.UDF = prompts.prompt_summarize,
         n_starting_documents: int = 2,
         factor: int = 2,
@@ -837,6 +859,7 @@ class AdaptiveRAGQuestionAnswerer(BaseRAGQuestionAnswerer):
             default_llm_name=default_llm_name,
             summarize_template=summarize_template,
             context_processor=context_processor,
+            query_transform=query_transform,
         )
         self.prompt_template = prompt_template
         self.n_starting_documents = n_starting_documents
@@ -854,9 +877,15 @@ class AdaptiveRAGQuestionAnswerer(BaseRAGQuestionAnswerer):
         else:
             data_column_name = "text"
 
+        # Optionally transform query before passing to the adaptive RAG function
+        if self.query_transform is None:
+            questions_for_index = pw_ai_queries.prompt
+        else:
+            questions_for_index = self.query_transform(pw_ai_queries.prompt)
+
         result = pw_ai_queries.select(
             result=answer_with_geometric_rag_strategy_from_index(
-                pw_ai_queries.prompt,
+                questions_for_index,
                 index,
                 data_column_name,  # index returns result in this column
                 self.llm,
