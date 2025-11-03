@@ -834,6 +834,22 @@ class AdaptiveRAGQuestionAnswerer(BaseRAGQuestionAnswerer):
     >>> app.run_server()  # doctest: +SKIP
     """  # noqa: E501
 
+        Note about query transformation:
+
+        - query_transform (optional): a callable or :class:`pw.UDF` that accepts a single
+            string argument (the user query) and returns a transformed query string. If
+            provided, the RAG retrieval flow will use the transformed query to search the
+            index. This is useful to plug in `prompt_query_rewrite` or `prompt_query_rewrite_hyde`.
+
+        Example usage:
+
+        >>> from pathway.xpacks.llm import prompts
+        >>> rag = BaseRAGQuestionAnswerer(
+        ...     llm=chat,
+        ...     indexer=vector_server,
+        ...     query_transform=prompts.prompt_query_rewrite,  # or a Python callable
+        ... )
+
     def __init__(
         self,
         llm: BaseChat,

@@ -1,0 +1,30 @@
+name: light CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  lint-and-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.10
+
+      - name: Install dev tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Run syntax check (py_compile)
+        run: |
+          python -m py_compile python/pathway/xpacks/llm/question_answering.py
+          python -m py_compile python/pathway/xpacks/llm/prompts.py
+
+      - name: Run ruff (lint)
+        run: |
+          ruff check python/pathway/xpacks/llm --select E,W,F
